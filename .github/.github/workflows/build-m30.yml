@@ -1,7 +1,9 @@
-name: Build M30 - strongSwan
+name: Build M30 - real strongSwan IKEv2
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
@@ -9,64 +11,47 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
+      - name: Checkout M30 repo
         uses: actions/checkout@v4
 
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git \
-            curl \
-            unzip \
-            zip \
-            build-essential \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            gettext \
-            bison \
-            flex \
-            gperf \
-            perl \
-            python3 \
-            jq \
-            make
+            git curl unzip zip build-essential autoconf automake libtool \
+            pkg-config gettext bison flex gperf perl python3 jq make \
+            libssl-dev
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
+        uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK components
+      - name: Install Android SDK + NDK
         run: |
-          yes | sdkmanager --licenses || true
-
+          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;27.3.13750724"
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;27.3.13750724'
 
-      - name: Verify Android SDK
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.3.13750724" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.3.13750724" >> "$GITHUB_ENV"
+
+      - name: Verify Android toolchain
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
+          java -version
+          test -x "$ANDROID_NDK_ROOT/ndk-build"
           test -d "$ANDROID_SDK_ROOT/platforms/android-36"
           test -d "$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          test -d "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          echo "Android toolchain OK"
 
-          echo "Android SDK: OK"
-          echo "Android NDK: OK"
-
-      - name: Clone strongSwan
+      - name: Clone official strongSwan
         run: |
           git clone --depth 1 \
             https://github.com/strongswan/strongswan.git \
@@ -82,36 +67,64 @@ jobs:
       - name: Build OpenSSL for Android
         working-directory: strongswan
         env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.3.13750724
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+          NO_DOCKER: '1'
         run: |
           git clone --depth 1 \
             https://github.com/openssl/openssl.git \
             openssl
 
           export OPENSSL_SRC="$PWD/openssl"
-          export NO_DOCKER=1
 
           chmod +x src/frontends/android/openssl/build.sh
           src/frontends/android/openssl/build.sh
 
+      - name: Inject M30 custom UI
+        run: |
+          APP="strongswan/src/frontends/android/app"
+
+          mkdir -p "$APP/src/main/java/org/strongswan/android/ui"
+          mkdir -p "$APP/src/main/res/values"
+
+          cp M30Activity.java \
+            "$APP/src/main/java/org/strongswan/android/ui/M30Activity.java"
+
+          cp m30_colors.xml \
+            "$APP/src/main/res/values/m30_colors.xml"
+
+          cp m30_strings.xml \
+            "$APP/src/main/res/values/m30_strings.xml"
+
+          cp m30_themes.xml \
+            "$APP/src/main/res/values/m30_themes.xml"
+
+          sed -i \
+            's#android:name=".ui.MainActivity"#android:name=".ui.M30Activity"#' \
+            "$APP/src/main/AndroidManifest.xml"
+
+          sed -i \
+            's#<string name="app_name">strongSwan VPN Client</string>#<string name="app_name">M30</string>#' \
+            "$APP/src/main/res/values/strings.xml" || true
+
       - name: Build M30 APK
         working-directory: strongswan/src/frontends/android
-        env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.3.13750724
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew clean assembleRelease \
+            --no-daemon \
+            --stacktrace
 
       - name: Find APK
         run: |
-          find strongswan/src/frontends/android \
+          find strongswan/src/frontends/android/app/build/outputs/apk \
             -type f \
-            -name "*.apk" \
+            -name '*.apk' \
             -print
 
-      - name: Upload APK
+      - name: Upload M30 APK
         uses: actions/upload-artifact@v4
         with:
-          name: M30-strongSwan-base
+          name: M30-real-strongSwan-IKEv2
           path: |
             strongswan/src/frontends/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
