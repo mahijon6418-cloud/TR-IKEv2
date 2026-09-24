@@ -25,24 +25,34 @@ jobs:
         with:
           gradle-version: "8.11"
 
+      - name: Find latest project ZIP
+        id: project
+        run: |
+          ZIP=$(find . -maxdepth 1 -type f -name 'TR_IKEv2_Client_*.zip' | sort -V | tail -n 1)
+          echo "Using: $ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
       - name: Extract Android project
         run: |
           mkdir android-project
-          unzip -q TR_IKEv2_Client_v1.1.zip -d android-project
+          unzip -q "${{ steps.project.outputs.zip }}" -d android-project
 
       - name: Build Debug APK
         working-directory: android-project
         run: |
-          gradle assembleDebug --no-daemon
+          gradle \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            assembleDebug \
+            --no-daemon
 
       - name: Rename APK
         run: |
           cp android-project/app/build/outputs/apk/debug/app-debug.apk \
-             TR-IKEv2-v1.1-debug.apk
+             TR-IKEv2-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TR-IKEv2-v1.1-APK
-          path: TR-IKEv2-v1.1-debug.apk
+          name: TR-IKEv2-APK
+          path: TR-IKEv2-debug.apk
           retention-days: 30
