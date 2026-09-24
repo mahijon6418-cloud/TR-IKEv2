@@ -1,0 +1,82 @@
+name: Build M30 - strongSwan Base
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android strongSwan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            curl \
+            unzip \
+            zip \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            gettext \
+            python3
+
+      - name: Clone strongSwan
+        run: |
+          git clone --depth 1 \
+            https://github.com/strongswan/strongswan.git \
+            strongswan
+
+      - name: Show Android project
+        run: |
+          ls -la strongswan/src/frontends/android
+          find strongswan/src/frontends/android -maxdepth 2 -type f | head -50
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK tools
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+          sdkmanager "ndk;27.2.12479018"
+
+      - name: Prepare build environment
+        working-directory: strongswan
+        run: |
+          echo "strongSwan source ready"
+          git rev-parse --short HEAD
+
+      - name: Build Android project
+        working-directory: strongswan/src/frontends/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Find APK
+        run: |
+          find strongswan/src/frontends/android \
+            -type f \
+            -name "*.apk" \
+            -print
+
+      - name: Upload M30 base APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: M30-strongSwan-base
+          path: |
+            strongswan/src/frontends/android/**/build/outputs/apk/**/*.apk
